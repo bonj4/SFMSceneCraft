@@ -75,7 +75,7 @@ def extract_features(image, detector='sift', GoodP=False, mask=None):
         det = cv2.ORB_create()
     if GoodP:
         pts = cv2.goodFeaturesToTrack(
-            image, 3000, qualityLevel=0.01, minDistance=7)
+            image, 10000, qualityLevel=0.01, minDistance=7)
         kps = [cv2.KeyPoint(x=f[0][0], y=f[0][1], size=15) for f in pts]
         kp, des = det.compute(image, kps)
 
