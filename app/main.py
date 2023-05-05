@@ -5,8 +5,9 @@ import os
 from utils import *
 from data import dataset
 import time
-from plot_utils import viz_3d
 from bundle_adjustment import bundle_adjustment
+import open3d as o3d
+
 
 def SFM(detector='sift', matching='FLANN',GoodP=True, dist_threshold=0.35,):
     data=dataset()
@@ -66,10 +67,18 @@ def SFM(detector='sift', matching='FLANN',GoodP=True, dist_threshold=0.35,):
             R_t_0 = np.copy(R_t_1)
             P1 = np.copy(P2)
 
+
     pts_4d.append(X)
     pts_4d.append(Y)
     pts_4d.append(Z)
-    viz_3d(np.array(pts_4d))
+
+
+    pcd = o3d.geometry.PointCloud()  
+    pcd.points = o3d.utility.Vector3dVector(np.array(pts_4d).T)
+
+    # Visualize the point cloud
+    o3d.visualization.draw_geometries([pcd])
+    # viz_3d(np.array(pts_4d))
 if __name__=='__main__':
     s=time.perf_counter()
     SFM()
