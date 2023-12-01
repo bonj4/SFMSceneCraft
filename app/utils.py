@@ -9,22 +9,23 @@ import matplotlib.gridspec as gridspec
 from random import randint
 from mayavi import mlab
 
+
 def mse(ground_truth, estimated):
     nframes_est = estimated.shape[0]
 
-    se = [((es[0, 3] - gt[0, 3])**2)+((es[1, 3] - gt[1, 3])**2)+((es[2, 3] - gt[2, 3])**2)
+    se = [((es[0, 3] - gt[0, 3]) ** 2) + ((es[1, 3] - gt[1, 3]) ** 2) + ((es[2, 3] - gt[2, 3]) ** 2)
           for idx, (gt, es) in enumerate(zip(ground_truth[:nframes_est, ...], estimated))]
     return np.array(se).mean()
 
 
 def drawMatches(img1, img2, kp1, kp2, matches):
     merge_img = cv2.hconcat([img1, img2])
-    merge_img=cv2.cvtColor(merge_img,cv2.COLOR_GRAY2BGR)
+    merge_img = cv2.cvtColor(merge_img, cv2.COLOR_GRAY2BGR)
     for m in matches:
         r = randint(0, 255)
         g = randint(0, 255)
         b = randint(0, 255)
-        rand_color = (b,g,r)
+        rand_color = (b, g, r)
         p1 = kp1[m.queryIdx]
         p2 = kp2[m.trainIdx]
 
@@ -32,8 +33,8 @@ def drawMatches(img1, img2, kp1, kp2, matches):
         x2, y2 = map(lambda x: int(round(x)), p2)
         cv2.circle(merge_img, (x1, y1), 3, (255))
 
-        cv2.circle(merge_img, (img1.shape[1]+x2, y2), 3,rand_color)
-        cv2.line(merge_img, (x1, y1), (img1.shape[1]+x2, y2), rand_color)
+        cv2.circle(merge_img, (img1.shape[1] + x2, y2), 3, rand_color)
+        cv2.line(merge_img, (x1, y1), (img1.shape[1] + x2, y2), rand_color)
     return merge_img
 
 
@@ -42,12 +43,10 @@ def filter_matches_distance(matches, dist_threshold=0.5):
     for m, n in matches:
         if m.distance <= dist_threshold * n.distance:
             filtered_matches.append(m)
-    print("-----------",len(matches), len(filtered_matches))
     return filtered_matches
 
 
 def match_features(des1, des2, matching='BF', detector='sift', sort=False, k=2):
-
     if matching == 'BF':
         if detector == 'sift':
             matcher = cv2.BFMatcher_create(cv2.NORM_L2, crossCheck=False)
@@ -68,7 +67,6 @@ def match_features(des1, des2, matching='BF', detector='sift', sort=False, k=2):
 
 
 def extract_features(image, detector='sift', GoodP=False, mask=None):
-
     if detector == 'sift':
         det = cv2.SIFT_create()
     elif detector == 'orb':
@@ -86,7 +84,6 @@ def extract_features(image, detector='sift', GoodP=False, mask=None):
 
 
 def calc_depth_map(disp_left, k_left, t_left, t_right, rectified=True):
-
     if rectified:
         b = t_right[0] - t_left[0]
     else:
@@ -110,7 +107,6 @@ def decompose_projection_matrix(p):
 
 
 def compute_left_disparity_map(img_left, img_right, matcher='bm', verbose=False):
-
     sad_window = 6
     num_disparities = sad_window * 16
     block_size = 11
@@ -129,26 +125,26 @@ def compute_left_disparity_map(img_left, img_right, matcher='bm', verbose=False)
                                         mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY)
 
     start = time.perf_counter()
-    disp_left = matcher.compute(img_left, img_right).astype(np.float32)/16
+    disp_left = matcher.compute(img_left, img_right).astype(np.float32) / 16
     end = time.perf_counter()
 
     if verbose:
         print(
-            f'Time to compute disparity map using Stereo{matcher_name.upper()}', end-start)
+            f'Time to compute disparity map using Stereo{matcher_name.upper()}', end - start)
 
     return disp_left
 
 
 def viz_3d(pt_3d):
-    X = pt_3d[0,:]
-    Y = pt_3d[1,:]
-    Z = pt_3d[2,:]
+    X = pt_3d[0, :]
+    Y = pt_3d[1, :]
+    Z = pt_3d[2, :]
 
     mlab.points3d(
-        X,   # x
-        Y,   # y
-        Z,   # z
-        mode="point", # How to render each point {'point', 'sphere' , 'cube' }
+        X,  # x
+        Y,  # y
+        Z,  # z
+        mode="point",  # How to render each point {'point', 'sphere' , 'cube' }
         colormap='copper',  # 'bone', 'copper',
         line_width=10,
         scale_factor=1
@@ -156,10 +152,11 @@ def viz_3d(pt_3d):
     # mlab.axes(xlabel='x', ylabel='y', zlabel='z',ranges=(0,20,0,20,0,10),nb_labels=10)
     mlab.show()
 
+
 def viz_3d_matplotlib(pt_3d):
-    X = pt_3d[0,:]
-    Y = pt_3d[1,:]
-    Z = pt_3d[2,:]
+    X = pt_3d[0, :]
+    Y = pt_3d[1, :]
+    Z = pt_3d[2, :]
 
     fig = plt.figure(1)
     ax = fig.add_subplot(111, projection='3d')
@@ -169,7 +166,7 @@ def viz_3d_matplotlib(pt_3d):
                Z,
                s=1,
                cmap='gray')
-    
+
     plt.show()
 
 
@@ -178,38 +175,38 @@ def draw_epipolar_lines(pts1, pts2, img1, img2):
     pts2 = np.int32(pts2)
     # Find epilines corresponding to points in right image (second image) and
     # drawing its lines on left image
-    lines1 = cv2.computeCorrespondEpilines(pts2.reshape(-1,1,2), 2,)
-    lines1 = lines1.reshape(-1,3)
-    img5,img6 = drawlines(img1,img2,lines1,pts1,pts2)
+    lines1 = cv2.computeCorrespondEpilines(pts2.reshape(-1, 1, 2), 2, )
+    lines1 = lines1.reshape(-1, 3)
+    img5, img6 = drawlines(img1, img2, lines1, pts1, pts2)
     # Find epilines corresponding to points in left image (first image) and
     # drawing its lines on right image
-    lines2 = cv2.computeCorrespondEpilines(pts1.reshape(-1,1,2), 1,)
-    lines2 = lines2.reshape(-1,3)
-    img3,img4 = drawlines(img2,img1,lines2,pts2,pts1)
+    lines2 = cv2.computeCorrespondEpilines(pts1.reshape(-1, 1, 2), 1, )
+    lines2 = lines2.reshape(-1, 3)
+    img3, img4 = drawlines(img2, img1, lines2, pts2, pts1)
     plt.subplot(121)
     plt.imshow(img5)
     plt.subplot(122)
     plt.imshow(img3)
     plt.show()
 
-def drawlines(img1,img2,lines,pts1,pts2):
+
+def drawlines(img1, img2, lines, pts1, pts2):
     ''' img1 - image on which we draw the epilines for the points in img2
         lines - corresponding epilines '''
-    r,c = img1.shape
-    img1 = cv2.cvtColor(img1,cv2.COLOR_GRAY2BGR)
-    img2 = cv2.cvtColor(img2,cv2.COLOR_GRAY2BGR)
-    for r,pt1,pt2 in zip(lines,pts1,pts2):
-        color = tuple(np.random.randint(0,255,3).tolist())
-        x0,y0 = map(int, [0, -r[2]/r[1] ])
-        x1,y1 = map(int, [c, -(r[2]+r[0]*c)/r[1] ])
-        img1 = cv2.line(img1, (x0,y0), (x1,y1), color,1)
-        img1 = cv2.circle(img1,tuple(pt1),5,color,-1)
-        img2 = cv2.circle(img2,tuple(pt2),5,color,-1)
-    return img1,img2
+    r, c = img1.shape
+    img1 = cv2.cvtColor(img1, cv2.COLOR_GRAY2BGR)
+    img2 = cv2.cvtColor(img2, cv2.COLOR_GRAY2BGR)
+    for r, pt1, pt2 in zip(lines, pts1, pts2):
+        color = tuple(np.random.randint(0, 255, 3).tolist())
+        x0, y0 = map(int, [0, -r[2] / r[1]])
+        x1, y1 = map(int, [c, -(r[2] + r[0] * c) / r[1]])
+        img1 = cv2.line(img1, (x0, y0), (x1, y1), color, 1)
+        img1 = cv2.circle(img1, tuple(pt1), 5, color, -1)
+        img2 = cv2.circle(img2, tuple(pt2), 5, color, -1)
+    return img1, img2
 
 
-def estimate_motion(matches, kp1, kp2, k, depth1=None, max_depth=3000):
-
+def estimate_motion(matches, kp1, kp2, k=None, depth1=None, max_depth=3000):
     rmat = np.eye(3)
     tvec = np.zeros((3, 1))
 
@@ -242,14 +239,15 @@ def estimate_motion(matches, kp1, kp2, k, depth1=None, max_depth=3000):
         rmat = cv2.Rodrigues(rvec)[0]
     else:
         # Compute the essential matrix
-        essential_matrix, mask = cv2.findEssentialMat(image1_points, image2_points, focal=1.0, pp=(
-            0., 0.), method=cv2.RANSAC, prob=0.999, threshold=3.0)
+        if k is not None:
+            essential_matrix, mask = cv2.findEssentialMat(image1_points, image2_points, cameraMatrix=k,
+                                                          method=cv2.RANSAC,
+                                                          prob=0.999, threshold=3.0)
+        else:
+            essential_matrix, mask = cv2.findEssentialMat(image1_points, image2_points, focal=1.0, pp=(
+                0., 0.), method=cv2.RANSAC, prob=0.999, threshold=3.0)
 
         # Recover the relative pose of the cameras
         _, rmat, tvec, mask = cv2.recoverPose(
             essential_matrix, image1_points, image2_points)
     return rmat, tvec, image1_points, image2_points
-
-
-
-     
