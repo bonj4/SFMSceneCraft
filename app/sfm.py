@@ -1,8 +1,10 @@
-import numpy as np
+import cv2
+from display import Display3D
 from data import dataset
 import yaml
 from tqdm import tqdm
 from utils import *
+import open3d as o3d
 
 
 class SFM():
@@ -13,6 +15,7 @@ class SFM():
         self.num_frame = self.data.num_frame
         # init matrices
         self.init_matrices()
+        self.disp=Display3D()
 
     def get_params(self, ):
         try:
@@ -34,12 +37,10 @@ class SFM():
         self.K = self.data.K
         self.R_t_0 = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]])
         self.R_t_1 = np.empty((3, 4))
-        self.P1 = np.matmul(self.K, self.R_t_0)
-        self.P2 = np.empty((3, 4))
-        self.pts_4d = []
-        self.X = np.array([])
-        self.Y = np.array([])
-        self.Z = np.array([])
+        self.P1 = np.eye(4)
+
+        self.pts_4d = np.array([[],[],[]]).T
+        self.poses=[self.P1]
 
     def run(self):
         for idx in tqdm(range(self.num_frame)):
@@ -63,15 +64,27 @@ class SFM():
                 rmat, tvec, image1_points, image2_points = estimate_motion(
                     matches=matches, kp1=prev_kp, kp2=curr_kp, k=self.data.K, depth1=None)
 
-                self.R_t_1[:3, :3] = np.matmul(rmat, self.R_t_0[:3, :3])
-                self.R_t_1[:3, 3] = self.R_t_0[:3, 3] + np.matmul(self.R_t_0[:3, :3], tvec.ravel())
+                Rt = poseRt(rmat, tvec)
+                self.P2 = np.dot(self.P1, np.linalg.inv(Rt), )
+                self.poses.append(self.P2)
+                point1, point2 = norm_points(image1_points, image2_points, self.data.K)
 
-                self.P2 = np.matmul(self.K, self.R_t_1)
+                points_3d = triangulatecv(self.P1, self.P2, point1, point2)
+
+                points_3d = cv2.convertPointsFromHomogeneous(points_3d)
+                dist_list = calc_dist(origin=self.P2[:3, 3], ls=points_3d[:, 0])
+                filter_pts = points_3d[:, 0, 2] > 0
+                filter_pts &= dist_list < 20
+                filtered_points_3d = points_3d[filter_pts][:,0]
+                self.pts_4d = np.concatenate((self.pts_4d, filtered_points_3d))
+
+                print(points_3d[:, 0].shape, self.pts_4d.shape)
 
 
+                self.disp.paint(self.poses,self.pts_4d)
                 prev_img = curr_img
-                R_t_0 = np.copy(self.R_t_1)
-                P1 = np.copy(self.P2)
+                self.P1 = np.copy(self.P2)
+
 
 
 if __name__ == "__main__":
