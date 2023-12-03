@@ -4,7 +4,6 @@ from data import dataset
 import yaml
 from tqdm import tqdm
 from utils import *
-import open3d as o3d
 
 
 class SFM():
@@ -40,6 +39,7 @@ class SFM():
         self.P1 = np.eye(4)
 
         self.pts_4d = np.array([[],[],[]]).T
+        self.colors_4d = np.array([[],[],[]]).T
         self.poses=[self.P1]
 
     def run(self):
@@ -67,6 +67,8 @@ class SFM():
                 Rt = poseRt(rmat, tvec)
                 self.P2 = np.dot(self.P1, np.linalg.inv(Rt), )
                 self.poses.append(self.P2)
+
+                curr_clr=get_colors(curr_img,image2_points)
                 point1, point2 = norm_points(image1_points, image2_points, self.data.K)
 
                 points_3d = triangulatecv(self.P1, self.P2, point1, point2)
@@ -74,14 +76,17 @@ class SFM():
                 points_3d = cv2.convertPointsFromHomogeneous(points_3d)
                 dist_list = calc_dist(origin=self.P2[:3, 3], ls=points_3d[:, 0])
                 filter_pts = points_3d[:, 0, 2] > 0
-                filter_pts &= dist_list < 20
+                filter_pts &= dist_list < self.max_dist
                 filtered_points_3d = points_3d[filter_pts][:,0]
                 self.pts_4d = np.concatenate((self.pts_4d, filtered_points_3d))
 
-                print(points_3d[:, 0].shape, self.pts_4d.shape)
+                filtered_colors=curr_clr[filter_pts]
+                self.colors_4d = np.concatenate((self.colors_4d, filtered_colors))
+
+                # print(points_3d[:, 0].shape, self.pts_4d.shape)
 
 
-                self.disp.paint(self.poses,self.pts_4d)
+                self.disp.paint(self.poses,self.pts_4d,self.colors_4d)
                 prev_img = curr_img
                 self.P1 = np.copy(self.P2)
 
