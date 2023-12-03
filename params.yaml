@@ -1,5 +1,6 @@
-data_path: /home/visio-ai/PycharmProjects/CustomSFM/data/statue/
+data_path: path/datas/dataset/
 detector: sift
 matching: FLANN
-GoodP: true
+GoodP: 3000
 dist_threshold: 0.35
+max_dist: 10
