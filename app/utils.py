@@ -66,14 +66,15 @@ def match_features(des1, des2, matching='BF', detector='sift', sort=False, k=2):
     return matches
 
 
-def extract_features(image, detector='sift', GoodP=False, mask=None):
+def extract_features(image, detector='sift', GoodP=None, mask=None):
     if detector == 'sift':
         det = cv2.SIFT_create()
     elif detector == 'orb':
         det = cv2.ORB_create()
-    if GoodP:
+    if GoodP is not None:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         pts = cv2.goodFeaturesToTrack(
-            image, 3000, qualityLevel=0.01, minDistance=7)
+            gray, GoodP, qualityLevel=0.01, minDistance=7)
         kps = [cv2.KeyPoint(x=f[0][0], y=f[0][1], size=15) for f in pts]
         kp, des = det.compute(image, kps)
 
@@ -297,3 +298,7 @@ def norm_points(img1pts, img2pts, K):
     img2ptsNorm = cv2.convertPointsFromHomogeneous(img2ptsNorm)[:, 0, :]
 
     return img1ptsNorm, img2ptsNorm
+
+
+def get_colors(img, kps):
+    return np.array([img[int(kp[1]), int(kp[0])] for kp in kps])
