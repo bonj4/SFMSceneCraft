@@ -1,14 +1,9 @@
 import numpy as np
 import cv2
-import pandas as pd
 import time
-import math
 import matplotlib.pyplot as plt
-import matplotlib as mpl
-import matplotlib.gridspec as gridspec
 from random import randint
 from mayavi import mlab
-
 
 def mse(ground_truth, estimated):
     nframes_est = estimated.shape[0]
@@ -66,12 +61,12 @@ def match_features(des1, des2, matching='BF', detector='sift', sort=False, k=2):
     return matches
 
 
-def extract_features(image, detector='sift', GoodP=None, mask=None):
+def extract_features(image, detector='sift', GoodP=False,mask=None):
     if detector == 'sift':
         det = cv2.SIFT_create()
     elif detector == 'orb':
         det = cv2.ORB_create()
-    if GoodP is not None:
+    if GoodP:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         pts = cv2.goodFeaturesToTrack(
             gray, GoodP, qualityLevel=0.01, minDistance=7)
