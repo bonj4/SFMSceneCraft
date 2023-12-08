@@ -39,7 +39,7 @@ def fun(params, n_cameras, n_points, camera_indices, point_indices, points_2d, K
     # recover cameras params and points 3d
     camera_params=params[:n_cameras*6].reshape((n_cameras,6))
     points_3d=params[n_cameras*6:].reshape((n_points,3))
-    
+
     # reproject 3d points
     points_proj = project(points_3d[point_indices], camera_params[camera_indices])
     residual=points_proj-points_2d
@@ -65,3 +65,7 @@ def bundle_adjustment_sparsity(n_cameras, n_points, camera_indices, point_indice
         A[2 * i, n_cameras * 6 + point_indices * 3 + s] = 1
         A[2 * i + 1, n_cameras * 6 + point_indices * 3 + s] = 1
     return A
+
+# Citation:
+# [1] Shengyu HUANG. Doctoral student at ETH Zurich. 3D Vision + Machine Learning.
+# https://github.com/ShengyuH/PySFM/blob/master/python-code/bundle_adjustment.py
