@@ -1,6 +1,5 @@
 import numpy as np
 from scipy.sparse import lil_matrix
-import numpy.matlib
 
 
 def rotate(points, rot_vecs):
