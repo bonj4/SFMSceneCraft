@@ -4,6 +4,7 @@ import time
 import matplotlib.pyplot as plt
 from random import randint
 from mayavi import mlab
+from scipy.spatial.transform import Rotation as R
 
 def mse(ground_truth, estimated):
     nframes_est = estimated.shape[0]
@@ -294,6 +295,21 @@ def norm_points(img1pts, img2pts, K):
 
     return img1ptsNorm, img2ptsNorm
 
+def proj_mat_to_camera_vec(proj_mat):
+        '''
+        decompose the projection matrix to camera paras(rotation vector and translation vector)
+        Input:
+            proj_mat:       4 x 4
+        Output:
+            camera_vec:     1 x 6
+
+        '''
+        rot_mat = proj_mat[:3, :3]
+        r = R.from_matrix(rot_mat)
+        rot_vec = r.as_rotvec()
+        t_vec = proj_mat[:3, 3]
+        camera_vec = np.hstack((rot_vec, t_vec))
+        return camera_vec
 
 def get_colors(img, kps):
     return np.array([img[int(kp[1]), int(kp[0])] for kp in kps])
