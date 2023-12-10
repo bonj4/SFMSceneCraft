@@ -1,9 +1,10 @@
-import cv2
 from display import Display3D
 from data import dataset
 import yaml
 from tqdm import tqdm
 from utils import *
+from scipy.optimize import least_squares
+from bundle_adjustment import bundle_adjustment_sparsity, fun
 
 
 class SFM():
@@ -14,7 +15,7 @@ class SFM():
         self.num_frame = self.data.num_frame
         # init matrices
         self.init_matrices()
-        self.disp=Display3D()
+        self.disp = Display3D()
 
     def get_params(self, ):
         try:
@@ -38,11 +39,16 @@ class SFM():
         self.R_t_1 = np.empty((3, 4))
         self.P1 = np.eye(4)
 
-        self.pts_4d = np.array([[],[],[]]).T
-        self.colors_4d = np.array([[],[],[]]).T
-        self.poses=[self.P1]
+        self.pts_4d = np.array([[], [], []]).T
+        self.colors_4d = np.array([[], [], []]).T
+        self.poses = [self.P1]
+        self.point_indices = []
+        self.camera_indices = []
+        self.camera_parameters = np.zeros((self.num_frame, 6))
+        self.camera_parameters[0, :] = proj_mat_to_camera_vec(self.P1)
 
     def run(self):
+
         for idx in tqdm(range(self.num_frame)):
             if idx == 0:
                 prev_img = self.data.next_imgs()
@@ -68,7 +74,7 @@ class SFM():
                 self.P2 = np.dot(self.P1, np.linalg.inv(Rt), )
                 self.poses.append(self.P2)
 
-                curr_clr=get_colors(curr_img,image2_points)
+                curr_clr = get_colors(curr_img, image2_points)
                 point1, point2 = norm_points(image1_points, image2_points, self.data.K)
 
                 points_3d = triangulatecv(self.P1, self.P2, point1, point2)
@@ -77,16 +83,40 @@ class SFM():
                 dist_list = calc_dist(origin=self.P2[:3, 3], ls=points_3d[:, 0])
                 filter_pts = points_3d[:, 0, 2] > 0
                 filter_pts &= dist_list < self.max_dist
-                filtered_points_3d = points_3d[filter_pts][:,0]
+                filtered_points_3d = points_3d[filter_pts][:, 0]
                 self.pts_4d = np.concatenate((self.pts_4d, filtered_points_3d))
 
-                filtered_colors=curr_clr[filter_pts]
+                filtered_colors = curr_clr[filter_pts]
                 self.colors_4d = np.concatenate((self.colors_4d, filtered_colors))
 
-                # print(points_3d[:, 0].shape, self.pts_4d.shape)
+                print("observed point: ", filtered_points_3d.shape, " 3d points: ", self.pts_4d.shape)
 
+                # Bundle adjustment TODO make pure and understoodable
+                n_cameras, n_points, curr_points = len(self.poses), len(self.pts_4d), len(filtered_points_3d)
+                if idx == 1:
+                    self.points_2d = point1[filter_pts]
+                    self.camera_indices.extend([0] * n_points)
+                    self.point_indices.extend(np.arange(n_points))
 
-                self.disp.paint(self.poses,self.pts_4d,self.colors_4d)
+                self.camera_indices.extend([idx] * curr_points)
+                self.point_indices.extend(np.arange(curr_points))
+                self.points_2d = np.vstack((self.points_2d, point2[filter_pts]))
+
+                self.camera_parameters[idx, :] = proj_mat_to_camera_vec(self.P2)
+
+                x0 = np.hstack(
+                    (self.camera_parameters[:idx + 1].ravel(), self.pts_4d.ravel()))
+                A = bundle_adjustment_sparsity(n_cameras, n_points, np.array(self.camera_indices),
+                                               np.array(self.point_indices))
+                res = least_squares(fun, x0, jac='3-point', jac_sparsity=A, verbose=1, x_scale='jac', ftol=1e-5,
+                                    method='trf', loss='soft_l1',
+                                    args=(
+                                        n_cameras, n_points, np.array(self.camera_indices),
+                                        np.array(self.point_indices),
+                                        self.points_2d,
+                                        self.data.K))
+
+                self.disp.paint(self.poses, self.pts_4d, self.colors_4d)
                 prev_img = curr_img
                 self.P1 = np.copy(self.P2)
 
