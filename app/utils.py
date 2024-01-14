@@ -6,6 +6,7 @@ from random import randint
 from mayavi import mlab
 from scipy.spatial.transform import Rotation as R
 
+
 def mse(ground_truth, estimated):
     nframes_est = estimated.shape[0]
 
@@ -16,7 +17,7 @@ def mse(ground_truth, estimated):
 
 def drawMatches(img1, img2, kp1, kp2, matches):
     merge_img = cv2.hconcat([img1, img2])
-    merge_img = cv2.cvtColor(merge_img, cv2.COLOR_GRAY2BGR)
+    # merge_img = cv2.cvtColor(merge_img, cv2.COLOR_GRAY2BGR)
     for m in matches:
         r = randint(0, 255)
         g = randint(0, 255)
@@ -62,18 +63,27 @@ def match_features(des1, des2, matching='BF', detector='sift', sort=False, k=2):
     return matches
 
 
-def extract_features(image, detector='sift', GoodP=False,mask=None):
+def extract_features(image, sift_peak_threshold, edgeThreshold, detector='sift', GoodP=False, min_features=None,
+                     mask=None):
     if detector == 'sift':
-        det = cv2.SIFT_create()
+        det = cv2.SIFT_create(edgeThreshold=edgeThreshold,contrastThreshold=sift_peak_threshold)
     elif detector == 'orb':
-        det = cv2.ORB_create()
+        det = cv2.ORB_create(edgeThreshold=edgeThreshold)
     if GoodP:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         pts = cv2.goodFeaturesToTrack(
             gray, GoodP, qualityLevel=0.01, minDistance=7)
         kps = [cv2.KeyPoint(x=f[0][0], y=f[0][1], size=15) for f in pts]
         kp, des = det.compute(image, kps)
-
+    elif min_features is not None:
+        while True:
+            det = cv2.SIFT_create(edgeThreshold=edgeThreshold, contrastThreshold=sift_peak_threshold)
+            points = det.detect(image)
+            if len(points) < min_features and sift_peak_threshold > 0.0001:
+                sift_peak_threshold = (sift_peak_threshold * 2) / 3
+            else:
+                kp, des = det.compute(image, points)
+                break
     else:
         kp, des = det.detectAndCompute(image, mask)
     kp = np.array([(k.pt[0], k.pt[1]) for k in kp])
@@ -295,21 +305,42 @@ def norm_points(img1pts, img2pts, K):
 
     return img1ptsNorm, img2ptsNorm
 
-def proj_mat_to_camera_vec(proj_mat):
-        '''
-        decompose the projection matrix to camera paras(rotation vector and translation vector)
-        Input:
-            proj_mat:       4 x 4
-        Output:
-            camera_vec:     1 x 6
 
-        '''
-        rot_mat = proj_mat[:3, :3]
-        r = R.from_matrix(rot_mat)
-        rot_vec = r.as_rotvec()
-        t_vec = proj_mat[:3, 3]
-        camera_vec = np.hstack((rot_vec, t_vec))
-        return camera_vec
+def recover_projection_matrix(camera_param):
+    '''
+    given camera parameters, recover the projection matrix
+    Input:
+        camera_param:   1 x 6
+    Output:
+        P:              4 x 4
+
+    '''
+    rot_vec = camera_param[:3]
+    translate_vec = camera_param[3:]
+    r = R.from_rotvec(rot_vec)
+    rot_matrix = r.as_matrix()
+    P = np.eye(4)
+    P[:3, :3] = rot_matrix
+    P[:3, 3] = translate_vec.T
+    return P
+
+
+def proj_mat_to_camera_vec(proj_mat):
+    '''
+    decompose the projection matrix to camera paras(rotation vector and translation vector)
+    Input:
+        proj_mat:       4 x 4
+    Output:
+        camera_vec:     1 x 6
+
+    '''
+    rot_mat = proj_mat[:3, :3]
+    r = R.from_matrix(rot_mat)
+    rot_vec = r.as_rotvec()
+    t_vec = proj_mat[:3, 3]
+    camera_vec = np.hstack((rot_vec, t_vec))
+    return camera_vec
+
 
 def get_colors(img, kps):
     return np.array([img[int(kp[1]), int(kp[0])] for kp in kps])
