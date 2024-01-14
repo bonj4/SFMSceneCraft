@@ -15,7 +15,7 @@ class dataset():
         self.K=self.get_camera_intrinsic_params(self.sequences_dir+'cameras.txt')
         
     def next_imgs(self):
-        return cv2.rotate(next(self.img),cv2.ROTATE_90_CLOCKWISE)
+        return next(self.img)
     def reset_images(self):
         self.img=(cv2.imread(self.sequences_dir+"images/"+i,0) for i in sorted(os.listdir(self.sequences_dir+"images")) if i.endswith("JPG"))
     # def get_camera_intrinsic_params(self,path):
