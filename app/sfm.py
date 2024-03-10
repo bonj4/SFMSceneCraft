@@ -5,6 +5,7 @@ from tqdm import tqdm
 from utils import *
 from scipy.optimize import least_squares
 from bundle_adjustment import bundle_adjustment_sparsity, fun
+from frame import Frame
 
 
 class SFM():
@@ -35,15 +36,11 @@ class SFM():
 
     def init_matrices(self):
         self.K = self.data.K
-        self.R_t_0 = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]])
-        self.R_t_1 = np.empty((3, 4))
         self.P1 = np.eye(4)
+        self.poses = []
 
         self.pts_4d = np.array([[], [], []]).T
         self.colors_4d = np.array([[], [], []]).T
-        self.poses = [self.P1]
-        self.point_indices = []
-        self.camera_indices = []
         self.camera_parameters = np.zeros((self.num_frame, 6))
         self.camera_parameters[0, :] = proj_mat_to_camera_vec(self.P1)
 
@@ -51,47 +48,32 @@ class SFM():
 
         for idx in tqdm(range(self.num_frame)):
             if idx == 0:
-                prev_img = self.data.next_imgs()
+                prev_frame = Frame(self.data.next_imgs(), self.K)
+                self.poses.append(prev_frame.pose)
             else:
-                curr_img = self.data.next_imgs()
+                curr_frame = Frame(self.data.next_imgs(), self.K)
                 # Extract features
-                prev_kp, prev_des = extract_features(
-                    prev_img, detector=self.detector, GoodP=self.GoodP, sift_peak_threshold=self.sift_peak_threshold,
-                    edgeThreshold=self.sift_edge_threshold,min_features=self.min_features)
-                curr_kp, curr_des = extract_features(
-                    curr_img, detector=self.detector, GoodP=self.GoodP, sift_peak_threshold=self.sift_peak_threshold,
-                    edgeThreshold=self.sift_edge_threshold,min_features=self.min_features)
+                if not len(prev_frame.kps):
+                    prev_frame.add_features(
+                        extract_features(prev_frame.img, self.sift_peak_threshold,
+                                         self.sift_edge_threshold, self.detector, self.GoodP, self.min_features))
+                curr_frame.add_features(
+                    extract_features(curr_frame.img, self.sift_peak_threshold,
+                                     self.sift_edge_threshold, self.detector, self.GoodP, self.min_features))
                 # extract matches
-                matches_unfilter = match_features(
-                    des1=prev_des, des2=curr_des, matching=self.matching, detector=self.detector, )
-                if self.dist_threshold is not None:
-                    matches = filter_matches_distance(
-                        matches_unfilter, dist_threshold=self.dist_threshold)
-                else:
-                    matches = matches_unfilter
-                rmat, tvec, image1_points, image2_points = estimate_motion(
-                    matches=matches, kp1=prev_kp, kp2=curr_kp, k=self.data.K, depth1=None)
+                matches = match_features(
+                    prev_frame, curr_frame, matching=self.matching, detector=self.detector,
+                    dist_threshold=self.dist_threshold)
 
-                Rt = poseRt(rmat, tvec)
-                self.P2 = np.dot(self.P1, np.linalg.inv(Rt), )
-                self.poses.append(self.P2)
+                # rmat, tvec, image1_points, image2_points = estimate_motion(
+                #     matches=matches, kp1=prev_frame.kp, kp2=curr_frame.kp, k=self.data.K, depth1=None)
 
-                curr_clr = get_colors(curr_img, image2_points)
-                point1, point2 = norm_points(image1_points, image2_points, self.data.K)
+                estimate_motion(prev_frame, curr_frame, self.K, matches)
 
-                points_3d = triangulatecv(self.P1, self.P2, point1, point2)
+                points_3d = triangulation(prev_frame, curr_frame, self.K)
+                filtering_points(prev_frame, points_3d, self.max_dist)
+                filtering_points(curr_frame, points_3d, self.max_dist)
 
-                points_3d = cv2.convertPointsFromHomogeneous(points_3d)
-                dist_list = calc_dist(origin=self.P2[:3, 3], ls=points_3d[:, 0])
-                filter_pts = points_3d[:, 0, 2] > 0
-                filter_pts &= dist_list < self.max_dist
-                filtered_points_3d = points_3d[filter_pts][:, 0]
-                self.pts_4d = np.concatenate((self.pts_4d, filtered_points_3d))
-
-                filtered_colors = curr_clr[filter_pts]
-                self.colors_4d = np.concatenate((self.colors_4d, filtered_colors))
-
-                print("observed point: ", filtered_points_3d.shape, " 3d points: ", self.pts_4d.shape)
 
                 # Bundle adjustment TODO make pure and understoodable
                 # n_cameras, n_points, curr_points = len(self.poses), len(self.pts_4d), len(filtered_points_3d)
@@ -123,10 +105,12 @@ class SFM():
                 # for idx, camera_param in enumerate(camera_params):
                 #     self.poses[idx] = recover_projection_matrix(camera_param)
                 #     self.camera_parameters[idx, :] = camera_param
+                self.poses.append(curr_frame.pose)
+                self.pts_4d = np.concatenate((self.pts_4d, curr_frame.points3d))
+                self.colors_4d = np.concatenate(
+                    (self.colors_4d, curr_frame.get_colors(curr_frame.untriangulate_points2d)))
                 self.disp.paint(self.poses, self.pts_4d, self.colors_4d)
-                prev_img = curr_img
-                # self.P1 = np.copy(recover_projection_matrix(camera_params[-1]))
-                self.P1 = np.copy(self.P2)
+                prev_frame = curr_frame
 
 
 if __name__ == "__main__":
