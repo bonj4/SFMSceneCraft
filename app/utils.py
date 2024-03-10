@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from random import randint
 from mayavi import mlab
 from scipy.spatial.transform import Rotation as R
+from frame import Frame
 
 
 def mse(ground_truth, estimated):
@@ -43,7 +44,7 @@ def filter_matches_distance(matches, dist_threshold=0.5):
     return filtered_matches
 
 
-def match_features(des1, des2, matching='BF', detector='sift', sort=False, k=2):
+def match_features(frame1, frame2, dist_threshold=0.5, matching='BF', detector='sift', sort=False, k=2):
     if matching == 'BF':
         if detector == 'sift':
             matcher = cv2.BFMatcher_create(cv2.NORM_L2, crossCheck=False)
@@ -55,10 +56,13 @@ def match_features(des1, des2, matching='BF', detector='sift', sort=False, k=2):
         search_params = dict(checks=50)
         matcher = cv2.FlannBasedMatcher(index_params, search_params)
 
-    matches = matcher.knnMatch(des1, des2, k=k)
+    matches = matcher.knnMatch(frame1.des, frame2.des, k=k)
 
     if sort:
         matches = sorted(matches, key=lambda x: x[0].distance)
+
+    matches = filter_matches_distance(
+        matches, dist_threshold)
 
     return matches
 
@@ -66,7 +70,7 @@ def match_features(des1, des2, matching='BF', detector='sift', sort=False, k=2):
 def extract_features(image, sift_peak_threshold, edgeThreshold, detector='sift', GoodP=False, min_features=None,
                      mask=None):
     if detector == 'sift':
-        det = cv2.SIFT_create(edgeThreshold=edgeThreshold,contrastThreshold=sift_peak_threshold)
+        det = cv2.SIFT_create(edgeThreshold=edgeThreshold, contrastThreshold=sift_peak_threshold)
     elif detector == 'orb':
         det = cv2.ORB_create(edgeThreshold=edgeThreshold)
     if GoodP:
@@ -213,10 +217,110 @@ def drawlines(img1, img2, lines, pts1, pts2):
     return img1, img2
 
 
-def estimate_motion(matches, kp1, kp2, k=None, depth1=None, max_depth=3000):
-    rmat = np.eye(3)
-    tvec = np.zeros((3, 1))
+def pnp(prev_frame: Frame, curr_frame: Frame, K, matches):
+    pnp_threshold = 5
+    prev_triangulated_points, curr_triangulated_points, existing_points_3d = [], [], []
+    prev_untriangulate_points, curr_untriangulate_points = [], []
+    for match in matches:
+        prev_px = np.float32(prev_frame.kps[match.queryIdx])
+        curr_px = np.float32(curr_frame.kps[match.trainIdx])
+        idxs_3d = np.where((prev_frame.triangulated_points2d == prev_px).all(axis=1))[0]
 
+        if idxs_3d.size > 0:
+            idx_3d = idxs_3d[0]
+            prev_triangulated_points.append(prev_px)
+            curr_triangulated_points.append(curr_px)
+            existing_points_3d.append(prev_frame.points3d[idx_3d])
+        else:
+            prev_untriangulate_points.append(prev_px)
+            curr_untriangulate_points.append(curr_px)
+
+    prev_triangulated_points = np.float32(prev_triangulated_points)
+    curr_triangulated_points = np.float32(curr_triangulated_points)
+    prev_untriangulate_points = np.float32(prev_untriangulate_points)
+    curr_untriangulate_points = np.float32(curr_untriangulate_points)
+    existing_points_3d = np.float32(existing_points_3d)
+    # for kp in prev_untriangulate_points:
+    #     prev_frame.img = cv2.circle(prev_frame.img, np.int32(kp), 5, (0, 255, 0), -1)
+    # for kp in curr_untriangulate_points:
+    #     curr_frame.img = cv2.circle(curr_frame.img, np.int32(kp), 5, (0, 255, 0), -1)
+    # cv2.namedWindow('Image with Keypoints', cv2.WINDOW_NORMAL)
+    # cv2.namedWindow('Image with Keypoints1', cv2.WINDOW_NORMAL)
+    # cv2.imshow('Image with Keypoints', prev_frame.img)
+    # cv2.imshow('Image with Keypoints1', curr_frame.img)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+    _, rvec, tvec, ind_inliers = cv2.solvePnPRansac(objectPoints=existing_points_3d,
+                                                    imagePoints=curr_triangulated_points,
+                                                    cameraMatrix=K,
+                                                    distCoeffs=None,
+                                                    reprojectionError=pnp_threshold)
+    rmat, _ = cv2.Rodrigues(rvec)
+    curr_frame.points3d = np.concatenate((existing_points_3d[ind_inliers].reshape(-1, 3), curr_frame.points3d))
+    curr_frame.triangulated_points2d = np.concatenate((curr_triangulated_points[ind_inliers].reshape(-1, 2), curr_frame.triangulated_points2d))
+
+
+
+    return rmat, tvec, prev_untriangulate_points, curr_untriangulate_points
+
+
+def init_estimate(prev_frame, curr_frame, K, matches):
+    query_indice = np.array([match.queryIdx for match in matches])  # prev
+    train_indice = np.array([match.trainIdx for match in matches])  # curr
+
+    prev_untriangulate_points = np.float32(prev_frame.kps[query_indice])
+    curr_untriangulate_points = np.float32(curr_frame.kps[train_indice])
+
+    F, mask = cv2.findFundamentalMat(prev_untriangulate_points, curr_untriangulate_points, cv2.FM_RANSAC, 1, 0.99999)
+    E = np.dot(np.dot(K.T, F), K)
+
+    # filter the outliers
+    mask_F = mask.ravel() == 1
+    prev_untriangulate_points = prev_untriangulate_points[mask_F]
+    curr_untriangulate_points = curr_untriangulate_points[mask_F]
+
+    _, rmat, tvec, mask = cv2.recoverPose(
+        E, prev_untriangulate_points, curr_untriangulate_points, K)
+
+    # filter the outliers
+    __mask = mask.ravel() == 255
+    prev_untriangulate_points = prev_untriangulate_points[__mask]
+    curr_untriangulate_points = curr_untriangulate_points[__mask]
+
+    return rmat, tvec, prev_untriangulate_points, curr_untriangulate_points
+
+
+def estimate_motion(prev_frame: Frame, curr_frame: Frame, K, matches):
+    if len(prev_frame.triangulated_points2d):
+        rmat, tvec, prev_untriangulate_points, curr_untriangulate_points = pnp(prev_frame, curr_frame, K, matches)
+    else:
+        rmat, tvec, prev_untriangulate_points, curr_untriangulate_points = init_estimate(prev_frame, curr_frame, K,
+                                                                                         matches)
+
+    prev_frame.untriangulate_points2d = prev_untriangulate_points
+    curr_frame.untriangulate_points2d = curr_untriangulate_points
+    curr_frame.calc_pose(prev_frame.pose, rmat, tvec)
+
+
+def triangulation(prev_frame, curr_frame, K):
+    point1, point2 = norm_points(prev_frame.untriangulate_points2d, curr_frame.untriangulate_points2d, K)
+    points_3d = triangulatecv(prev_frame.pose, curr_frame.pose, point1, point2)
+    points_3d = cv2.convertPointsFromHomogeneous(points_3d)
+    return points_3d
+
+
+def filtering_points(frame, points_3d, max_dist):
+    dist_list = calc_dist(origin=frame.pose[:3, 3], ls=points_3d[:, 0])
+    filter_pts = dist_list < max_dist
+    frame.points3d = np.concatenate((points_3d[filter_pts][:, 0], frame.points3d))
+    # Concatenate the arrays
+    frame.triangulated_points2d = np.concatenate(
+        [frame.triangulated_points2d, frame.untriangulate_points2d[filter_pts]])
+
+    # frame.untriangulate_points2d = np.array([[], []]).T
+
+
+def estimate_motion_deprecated(matches, kp1, kp2, k=None, depth1=None, max_depth=3000):
     image1_points = np.float32([kp1[m.queryIdx] for m in matches])
     image2_points = np.float32([kp2[m.trainIdx] for m in matches])
     if depth1 is not None:
@@ -262,13 +366,6 @@ def estimate_motion(matches, kp1, kp2, k=None, depth1=None, max_depth=3000):
         _, rmat, tvec, mask = cv2.recoverPose(
             essential_matrix, image1_points, image2_points, k)
     return rmat, tvec, image1_points, image2_points
-
-
-def poseRt(R, t):
-    ret = np.eye(4)
-    ret[:3, :3] = R
-    ret[:3, 3] = t[:, 0]
-    return ret
 
 
 def triangulate(pose1, pose2, pts1, pts2):
@@ -340,7 +437,3 @@ def proj_mat_to_camera_vec(proj_mat):
     t_vec = proj_mat[:3, 3]
     camera_vec = np.hstack((rot_vec, t_vec))
     return camera_vec
-
-
-def get_colors(img, kps):
-    return np.array([img[int(kp[1]), int(kp[0])] for kp in kps])
