@@ -1,11 +1,8 @@
-from display import Display3D
-from data import dataset
 import yaml
 from tqdm import tqdm
+from data import dataset
+from display import Display3D
 from utils import *
-from scipy.optimize import least_squares
-from bundle_adjustment import bundle_adjustment_sparsity, fun
-from frame import Frame
 
 
 class SFM():
@@ -68,43 +65,13 @@ class SFM():
                 # rmat, tvec, image1_points, image2_points = estimate_motion(
                 #     matches=matches, kp1=prev_frame.kp, kp2=curr_frame.kp, k=self.data.K, depth1=None)
 
-                estimate_motion(prev_frame, curr_frame, self.K, matches)
+                estimate_motion(prev_frame, curr_frame, matches)
 
-                points_3d = triangulation(prev_frame, curr_frame, self.K)
+                points_3d = triangulation(prev_frame, curr_frame)
                 filtering_points(prev_frame, points_3d, self.max_dist)
                 filtering_points(curr_frame, points_3d, self.max_dist)
 
-
-                # Bundle adjustment TODO make pure and understoodable
-                # n_cameras, n_points, curr_points = len(self.poses), len(self.pts_4d), len(filtered_points_3d)
-                # if idx == 1:
-                #     self.points_2d = point1[filter_pts]
-                #     self.camera_indices.extend([0] * n_points)
-                #     self.point_indices.extend(np.arange(n_points))
-                #
-                # self.camera_indices.extend([idx] * curr_points)
-                # self.point_indices.extend(np.arange(curr_points))
-                # self.points_2d = np.vstack((self.points_2d, point2[filter_pts]))
-                #
-                # self.camera_parameters[idx, :] = proj_mat_to_camera_vec(self.P2)
-                #
-                # x0 = np.hstack(
-                #     (self.camera_parameters[:idx + 1].ravel(), self.pts_4d.ravel()))
-                # A = bundle_adjustment_sparsity(n_cameras, n_points, np.array(self.camera_indices),
-                #                                np.array(self.point_indices))
-                # res = least_squares(fun, x0, jac='3-point', jac_sparsity=A, verbose=1, x_scale='jac', ftol=1e-5,
-                #                     method='trf', loss='soft_l1',
-                #                     args=(
-                #                         n_cameras, n_points, np.array(self.camera_indices),
-                #                         np.array(self.point_indices),
-                #                         self.points_2d,
-                #                         self.data.K))
-                # optimized_params = res.x
-                # camera_params = optimized_params[:n_cameras * 6].reshape((n_cameras, 6))
-                # self.pts_4d = optimized_params[n_cameras * 6:].reshape((n_points, 3))
-                # for idx, camera_param in enumerate(camera_params):
-                #     self.poses[idx] = recover_projection_matrix(camera_param)
-                #     self.camera_parameters[idx, :] = camera_param
+                # TODO move poses,color_4d,pts_4d to display class. cause is those are use only in over there.
                 self.poses.append(curr_frame.pose)
                 self.pts_4d = np.concatenate((self.pts_4d, curr_frame.points3d))
                 self.colors_4d = np.concatenate(

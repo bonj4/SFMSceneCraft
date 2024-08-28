@@ -1,10 +1,12 @@
-import numpy as np
-import cv2
 import time
-import matplotlib.pyplot as plt
 from random import randint
+
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
 from mayavi import mlab
 from scipy.spatial.transform import Rotation as R
+
 from frame import Frame
 
 
@@ -90,7 +92,7 @@ def extract_features(image, sift_peak_threshold, edgeThreshold, detector='sift',
                 break
     else:
         kp, des = det.detectAndCompute(image, mask)
-    kp = np.array([(k.pt[0], k.pt[1]) for k in kp])
+    kp = np.array([(k.pt[0], k.pt[1]) for k in kp], dtype=np.uint32)
     return kp, des
 
 
@@ -217,7 +219,7 @@ def drawlines(img1, img2, lines, pts1, pts2):
     return img1, img2
 
 
-def pnp(prev_frame: Frame, curr_frame: Frame, K, matches):
+def pnp(prev_frame: Frame, curr_frame: Frame, matches):
     pnp_threshold = 5
     prev_triangulated_points, curr_triangulated_points, existing_points_3d = [], [], []
     prev_untriangulate_points, curr_untriangulate_points = [], []
@@ -228,14 +230,12 @@ def pnp(prev_frame: Frame, curr_frame: Frame, K, matches):
 
         if idxs_3d.size > 0:
             idx_3d = idxs_3d[0]
-            prev_triangulated_points.append(prev_px)
             curr_triangulated_points.append(curr_px)
             existing_points_3d.append(prev_frame.points3d[idx_3d])
         else:
             prev_untriangulate_points.append(prev_px)
             curr_untriangulate_points.append(curr_px)
 
-    prev_triangulated_points = np.float32(prev_triangulated_points)
     curr_triangulated_points = np.float32(curr_triangulated_points)
     prev_untriangulate_points = np.float32(prev_untriangulate_points)
     curr_untriangulate_points = np.float32(curr_untriangulate_points)
@@ -252,27 +252,29 @@ def pnp(prev_frame: Frame, curr_frame: Frame, K, matches):
     # cv2.destroyAllWindows()
     _, rvec, tvec, ind_inliers = cv2.solvePnPRansac(objectPoints=existing_points_3d,
                                                     imagePoints=curr_triangulated_points,
-                                                    cameraMatrix=K,
-                                                    distCoeffs=None,
-                                                    reprojectionError=pnp_threshold)
+                                                    cameraMatrix=curr_frame.K,
+                                                    distCoeffs=np.array([0, 0, 0, 0]).astype('float32'),
+                                                    reprojectionError=pnp_threshold,
+                                                    confidence=0.99999,
+                                                    flags=cv2.USAC_DEFAULT)
+    ind_inliers = None
     rmat, _ = cv2.Rodrigues(rvec)
     curr_frame.points3d = np.concatenate((existing_points_3d[ind_inliers].reshape(-1, 3), curr_frame.points3d))
-    curr_frame.triangulated_points2d = np.concatenate((curr_triangulated_points[ind_inliers].reshape(-1, 2), curr_frame.triangulated_points2d))
-
-
+    curr_frame.triangulated_points2d = np.concatenate(
+        (curr_triangulated_points[ind_inliers].reshape(-1, 2), curr_frame.triangulated_points2d))
 
     return rmat, tvec, prev_untriangulate_points, curr_untriangulate_points
 
 
-def init_estimate(prev_frame, curr_frame, K, matches):
+def init_estimate(prev_frame, curr_frame, matches):
     query_indice = np.array([match.queryIdx for match in matches])  # prev
     train_indice = np.array([match.trainIdx for match in matches])  # curr
 
     prev_untriangulate_points = np.float32(prev_frame.kps[query_indice])
     curr_untriangulate_points = np.float32(curr_frame.kps[train_indice])
 
-    F, mask = cv2.findFundamentalMat(prev_untriangulate_points, curr_untriangulate_points, cv2.FM_RANSAC, 1, 0.99999)
-    E = np.dot(np.dot(K.T, F), K)
+    F, mask = cv2.findFundamentalMat(prev_untriangulate_points, curr_untriangulate_points, cv2.USAC_DEFAULT, 1, 0.99999)
+    E = np.dot(np.dot(prev_frame.K.T, F), prev_frame.K)
 
     # filter the outliers
     mask_F = mask.ravel() == 1
@@ -280,7 +282,7 @@ def init_estimate(prev_frame, curr_frame, K, matches):
     curr_untriangulate_points = curr_untriangulate_points[mask_F]
 
     _, rmat, tvec, mask = cv2.recoverPose(
-        E, prev_untriangulate_points, curr_untriangulate_points, K)
+        E, prev_untriangulate_points, curr_untriangulate_points, prev_frame.K)
 
     # filter the outliers
     __mask = mask.ravel() == 255
@@ -290,20 +292,22 @@ def init_estimate(prev_frame, curr_frame, K, matches):
     return rmat, tvec, prev_untriangulate_points, curr_untriangulate_points
 
 
-def estimate_motion(prev_frame: Frame, curr_frame: Frame, K, matches):
+def estimate_motion(prev_frame: Frame, curr_frame: Frame, matches):
     if len(prev_frame.triangulated_points2d):
-        rmat, tvec, prev_untriangulate_points, curr_untriangulate_points = pnp(prev_frame, curr_frame, K, matches)
+        rmat, tvec, prev_untriangulate_points, curr_untriangulate_points = pnp(prev_frame, curr_frame, matches)
+        curr_frame.calc_pose(rmat, tvec)
     else:
-        rmat, tvec, prev_untriangulate_points, curr_untriangulate_points = init_estimate(prev_frame, curr_frame, K,
+        rmat, tvec, prev_untriangulate_points, curr_untriangulate_points = init_estimate(prev_frame, curr_frame,
                                                                                          matches)
+        curr_frame.calc_pose(rmat, tvec, prev_frame.pose)
 
     prev_frame.untriangulate_points2d = prev_untriangulate_points
     curr_frame.untriangulate_points2d = curr_untriangulate_points
-    curr_frame.calc_pose(prev_frame.pose, rmat, tvec)
 
 
-def triangulation(prev_frame, curr_frame, K):
-    point1, point2 = norm_points(prev_frame.untriangulate_points2d, curr_frame.untriangulate_points2d, K)
+def triangulation(prev_frame, curr_frame):
+    point1 = norm_points(prev_frame.untriangulate_points2d, prev_frame.K)
+    point2 = norm_points(curr_frame.untriangulate_points2d, curr_frame.K)
     points_3d = triangulatecv(prev_frame.pose, curr_frame.pose, point1, point2)
     points_3d = cv2.convertPointsFromHomogeneous(points_3d)
     return points_3d
@@ -390,17 +394,14 @@ def calc_dist(origin, ls):
     return dist
 
 
-def norm_points(img1pts, img2pts, K):
-    img1ptsHom = cv2.convertPointsToHomogeneous(img1pts)[:, 0, :]
-    img2ptsHom = cv2.convertPointsToHomogeneous(img2pts)[:, 0, :]
+def norm_points(imgpts, K):
+    imgptsHom = cv2.convertPointsToHomogeneous(imgpts)[:, 0, :]
 
-    img1ptsNorm = (np.linalg.inv(K).dot(img1ptsHom.T)).T
-    img2ptsNorm = (np.linalg.inv(K).dot(img2ptsHom.T)).T
+    imgptsNorm = (np.linalg.inv(K).dot(imgptsHom.T)).T
 
-    img1ptsNorm = cv2.convertPointsFromHomogeneous(img1ptsNorm)[:, 0, :]
-    img2ptsNorm = cv2.convertPointsFromHomogeneous(img2ptsNorm)[:, 0, :]
+    imgptsNorm = cv2.convertPointsFromHomogeneous(imgptsNorm)[:, 0, :]
 
-    return img1ptsNorm, img2ptsNorm
+    return imgptsNorm
 
 
 def recover_projection_matrix(camera_param):
